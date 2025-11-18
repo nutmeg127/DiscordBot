@@ -1,6 +1,6 @@
 # Instructions: 
 
-Use pip install -r requirements.txt to install dependencies
+Use pip install -r requirements.txt to install dependencies  
 You will need a .env file formatted as follows :  
 DISCORD_TOKEN= <DISCORD_TOKEN>  
 GROQ_API_KEY= <GROQ_API_KEY>  
