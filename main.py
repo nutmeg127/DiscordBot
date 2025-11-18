@@ -6,12 +6,26 @@ import logging
 from dotenv import load_dotenv
 import os
 import webserver
+from groq import Groq
+import pathlib
 
 # Load the env file 
-load_dotenv()
+# Get the directory where this script is located
+script_dir = pathlib.Path(__file__).parent.resolve()
+env_path = script_dir / '.env'
+print(f"DEBUG: Looking for .env at: {env_path}")
+print(f"DEBUG: .env exists: {env_path.exists()}")
+load_dotenv(dotenv_path=str(env_path))
 
 # Get the token for the bot
 token = os.getenv('DISCORD_TOKEN')
+
+# Get the token for Groq
+groq_api_key = os.getenv("GROQ_API_KEY")
+print(f"DEBUG: API key loaded: {groq_api_key is not None}")
+if groq_api_key is None:
+    raise ValueError("GROQ_API_KEY not found in environment variables. Make sure .env file exists and is properly formatted.")
+client = Groq(api_key=groq_api_key)
 
 # Creates or updates the discord.log file to log current bot activity
 handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
@@ -23,6 +37,32 @@ intents.members = True
 
 # Create the bot and give it a prefix
 bot = commands.Bot(command_prefix='Nutmeg ', intents=intents)
+
+# LLM Section
+def generate_llm_reply(user_text: str, username: str) -> str:
+    """
+    Call the LLM and get a reply in your style.
+    """
+    # Load system prompt from prompt.txt file
+    prompt_file = pathlib.Path(__file__).parent / 'prompt.txt'
+    try:
+        with open(prompt_file, 'r', encoding='utf-8') as f:
+            system_prompt = f.read().strip()
+    except FileNotFoundError:
+        system_prompt = "You are Nutmeg, a helpful Discord bot."
+        print("Warning: prompt.txt not found, using default prompt")
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"{username}: {user_text}"}
+        ],
+        max_tokens=60,
+        temperature=0.9,
+    )
+
+    return response.choices[0].message.content
 
 # Message displayed when bot is running
 @bot.event
@@ -41,7 +81,8 @@ async def on_member_join(member):
     
     # An array that contains random welcome messages
     welcomemessages = [f'Did I know you from Chill Vibe Rant {member.name}?', f'Oh great, it\'s {member.name}',
-                       f'Oh shit, it's {member.name} 😨', f'So, {member.name}, this is my goon cave.',
+                       f'Oh shit, its {member.name}',
+                       f'So, {member.name}, this is my goon cave.',
                        f'@everyone: Since {member.name} joined, I should let you know they were the reason Chill Vibe Rant got deleted!']
     
     # Display a random welcome message!
@@ -50,73 +91,44 @@ async def on_member_join(member):
 # This event basically reads every message that comes its way and sends an appropriate reply
 @bot.event
 async def on_message(message):
-   # Don't want to cause an infinite loop? Then don't let the bot reply to itself!
-   if message.author == bot.user:
-       return
+    # Don't reply to yourself
+    if message.author == bot.user:
+        return
 
-   # When we override the on_message event, we need to include this line otherwise the bot won't listen for any other messages
-   await bot.process_commands(message)
+    # Make sure commands still work
+    await bot.process_commands(message)
 
-   # This makes it so that there's a 1 in 5 chance of Bolu getting Pregnant Man reacted
-   if(random.randint(0, 4) == 2) and (message.author != bot.user):
+    # Keep your Pregnant Man reaction logic
+    if (random.randint(0, 4) == 2) and (message.author != bot.user):
         if message.author.id == 971593663333429338:
-            await message.add_reaction('🫃') 
-    
-   # Replies for the bot
-   replys = [
-       "Are you a twink? Can I touch you?",
-    "Hold up lemme hit this hip thrust PR",
-    "Would you like me if my ass measurement was 45?",
-    "Let me consult ChatGPT",
-    "You're kind of like Simeon Ntafos in a way.",
-    "Hold up let me ask my magic 8 ball",
-    "The lion agrees",
-    "The lion disagrees",
-    "Okay but have you considered killing yourself",
-    "The lion does not care about the opinion of people like YOU",
-    "I just fluked pawg status from 80%",
-    "Hop on among us tn?",
-    "ICE is at my door hold up",
-    "*claps my cheeks*",
-    "Aba is torturing me again",
-    "A lion does not care about the opinions of sheep like you.",
-    "Why are you staring at my ass?",
-    "Hold up lemme finish this ntafos assignment",
-    ]
-   
-   # Phrases for the bot
-   phrases = ["Are you a twink? Can I touch you?",
-    "Hold up lemme hit this hip thrust PR",
-    "Would you like me if my ass measurement was 45?",
-    "Let me consult ChatGPT",
-    "You're kind of like Simeon Ntafos in a way.",
-    "Hold up let me ask my magic 8 ball",
-    "The lion agrees",
-    "The lion disagrees",
-    "The lion does not care about the opinion of people like YOU",
-    "I just fluked pawg status from 80%",
-    "Hop on among us tn?",
-    "ICE is at my door hold up",
-    "*claps my cheeks*",
-    "Aba is torturing me again",
-    "A lion does not care about the opinions of sheep like you.",
-    "Why are you staring at my ass?",
-    "Hold up lemme finish this ntafos assignment",
-    "Did you know that the size of my suicidal ideation is negatively correlated with the size of my ass?", 
-    "Generating a banger hold on"]
-   
-   # If the messages starts with Nutmeg, a random reply is sent
-   if message.content.startswith('Nutmeg'):
-       await message.channel.send(random.choice(replys))
-   
-   # Replies to the user when the bot is mentioned
-   elif(bot.user in message.mentions):
-        await message.channel.send(random.choice(replys))
-        
-   # This makes it so that there's a 1 in 5 chance of the bot replying with a random phrase
-   elif(random.randint(0, 4) == 2) and (message.author != bot.user):
-        await message.channel.send(random.choice(phrases))
+            await message.add_reaction('🫃')
 
+    # If user calls prefix (Nutmeg ...) OR mentions the bot → use LLM
+    if message.content.startswith('Nutmeg') or (bot.user in message.mentions):
+        try:
+            reply_text = generate_llm_reply(
+                user_text=message.content,
+                username=message.author.display_name
+            )
+        except Exception as e:
+            # Fallback if API dies
+            print(f"LLM error: {e}")
+            fallback_responses = [
+                "Bro I'm broke, my OpenAI credits ran out 💀",
+                "My brain's offline (ran out of API credits)",
+                "Hold up lemme check my bank account... oh wait I'm broke",
+                "ERROR 429: Too broke to think rn",
+                "ChatGPT said no more free thoughts for me today"
+            ]
+            reply_text = random.choice(fallback_responses)
+        
+        try:
+            await message.channel.send(reply_text)
+        except Exception as e:
+            print(f"Error sending message: {e}")
+        return
+
+        
 # Command that allows the bot to join the VC when "summoned"
 @bot.command()
 async def join(ctx):
